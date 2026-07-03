@@ -12,18 +12,30 @@ def kernel(A, B=None, S=None):
 
 torch.manual_seed(0)
 
-n_ref = 20
-n_features = 5
-n_train = 20
+# n_ref = 20
+# n_features = 5
+# n_train = 20
 
-X = torch.randn(n_ref, n_features)
-X_l = torch.randn(n_train, n_features)
-X_r = torch.randn(n_train, n_features)
+# X = torch.randn(n_ref, n_features)
+# X_l = torch.randn(n_train, n_features)
+# X_r = torch.randn(n_train, n_features)
+
+#x_l = torch.randn(1, n_features)
+#x_r = torch.randn(1, n_features)
+
+# alpha = torch.randn(n_train, 1)
+
+X = torch.from_numpy(np.load("toy_data_5000_10_2/S.npy")).float()
+X_l = torch.from_numpy(np.load("toy_data_5000_10_2/l_processed.npy")).float()
+X_r = torch.from_numpy(np.load("toy_data_5000_10_2/r_processed.npy")).float()
+
+n_features = X.shape[1]
+n_train = X_l.shape[0]
 
 x_l = torch.randn(1, n_features)
 x_r = torch.randn(1, n_features)
 
-alpha = torch.randn(n_train, 1)
+alpha = torch.randn(X_l.shape[0], 1)
 
 beta, Y_cat, weights, Z = pref_shap_item_clean(
     alpha=alpha,
