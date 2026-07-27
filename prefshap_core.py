@@ -75,32 +75,23 @@ def expand_Z_to_original_features(Z_eff, mask, n_features):
 
     Pref-SHAP is computed in Z_eff but the final output should still have one entry per original features.
     Inactive features are set to 0. 
-
     """
     Z = torch.zeros(Z_eff.shape[0], n_features, device=Z_eff.device, dtype=Z_eff.dtype)
     Z[:, mask] = Z_eff
     return Z
 
-def base_10_base_2(indices: np.array,d:int=10):
+def base_10_base_2(indices: np.ndarray, d: int = 10) -> np.ndarray:
     """
-    Convert integer coalition indentifiers into binary coalition vectors.
-        Eg: index 5 with d=4 becomes [1,0,1,0] 
+    Convert decimal coalition indices into binary coalition vectors.
+    Example:
+        index 5, d=4 -> [1, 0, 1, 0]
     """
+    indices = np.asarray(indices, dtype=np.uint64)
+    bit_positions = np.arange(d, dtype=np.uint64)
 
-    S= np.zeros((indices.shape[0],d))
-    rest = indices
-    valid_rows = rest>0
-    while True:
-        set_to_1 =  np.floor(np.log2(rest)).astype(int)
-        set_to_1_prime=set_to_1[valid_rows][:,np.newaxis]
-        p = S[valid_rows,:]
-        np.put_along_axis(p, set_to_1_prime, 1, axis=1)
-        S[valid_rows, :] = p
-        # S[valid_rows,:][:,set_to_1_prime]=1
-        rest = rest-2**(np.clip(set_to_1,0,np.inf))
-        valid_rows = rest>0
-        if valid_rows.sum()==0:
-            return S
+    return (
+        (indices[:, None] >> bit_positions) & 1
+    ).astype(float)
 
 def base_2_base_10(N:int=2500,d:int=10):
     """ Randomly sample binary coaltiion vectors and remove duplicates. """
@@ -150,6 +141,40 @@ def build_item_coalitions_and_weights(mask, n_features, n_samples, device, big_w
     Z = expand_Z_to_original_features(Z_eff, mask, n_features)
     return Z, weights
 
+def preference_kernel_value(X_l, X_r, x_l, x_r, kernel):
+    """
+    Generalized prefential kernel
+
+    Computes k_E((X_l_j, X_r_j), (x_l, x_r)) for all training pairs j.
+    """
+    S = torch.ones(X_l.shape[1], device=X_l.device, dtype=torch.bool)
+
+    K_Xl_xl = kernel(X_l[:, S], x_l[:, S], S)
+    K_Xr_xr = kernel(X_r[:, S], x_r[:, S], S)
+    K_Xl_xr = kernel(X_l[:, S], x_r[:, S], S)
+    K_Xr_xl = kernel(X_r[:, S], x_l[:, S], S)
+
+    return K_Xl_xl * K_Xr_xr - K_Xl_xr * K_Xr_xl
+
+def g_hat(alpha,X_l, X_r, x_l, x_r, kernel):
+    '''
+    Computes g_hat(x_l, g_r) using the generalized prefential kernel
+
+    g_hat(x_l, x_r) = Σ_j alpha_j · k_E((X_l_j, X_r_j), (x_l, x_r))
+
+    Mathmatically should be: v(full) = g_hat(x_l, x_r)
+    '''
+
+    pref_kernel_value = preference_kernel_value(
+        X_l= X_l,
+        X_r=X_r,
+        x_l=x_l,
+        x_r=x_r,
+        kernel=kernel
+    )
+
+    value = alpha @ pref_kernel_value
+    return value.reshape(1)
 
 def compute_pref_value_item_single_S(
         alpha,
@@ -164,12 +189,11 @@ def compute_pref_value_item_single_S(
         y_pred_mean = None #Basiswert; ein Durchschnittwert; deint zur Messung der Abweichung der Coallition-values von dem Durchschnittswert
 ):
     """
-    COmputes item_level PrefSHAP value function v(S) for one coalition.
+    Computes item_level PrefSHAP value function v(S) for one coalition.
 
     Implementation: Proposition 3.2 von original kernel_tensor_batch()
     value (S) = alpha^T * [Gamma(left,left) * Gamma(right,right)
                             - Gamma(left,right) * Gamma(right,left)]
-
     """
 
     S = S.bool()
@@ -189,8 +213,14 @@ def compute_pref_value_item_single_S(
         return torch.zeros(1, device=device, dtype=dtype)
 
     # For empty S_C:
+    # wenn alle Features vorhanden sind, muss nichts mehr über Missing Features integriert werden.
     if S_C.sum() == 0:
-        return torch.zeros(1, device=device, dtype=dtype)
+        return g_hat(alpha=alpha,
+                     X_l=X_l,
+                     X_r=X_r,
+                     x_l=x_l,
+                     x_r=x_r,
+                     kernel=kernel)
 
     # 1. Kernel matrix K_{X_S, X_S}
     # Original:
@@ -254,8 +284,8 @@ def compute_pref_value_item_single_S(
     # Gamma_l_r = K_XlS_xrS * M_r_l
     # Gamma_r_l = K_XrS_xlS * M_r_r
 
-    positive = (K_XlS_xlS * K_XrS_xrS * M_l_l * M_l_r)
-    negative = (K_XlS_xrS * K_XrS_xlS * M_r_l * M_r_r)
+    positive = (K_XlS_xlS * K_XrS_xrS * M_l_l * M_r_r)
+    negative = (K_XlS_xrS * K_XrS_xlS * M_l_r * M_r_l)
 
     # DEBUG: for x_r = x_l.clone(), we expect Gamma_ll = Gamma_lr and Gamma_rr = Gamma_rl.
     if torch.equal(S, torch.tensor([1, 0, 0, 0, 0], device=S.device, dtype=S.dtype)):
@@ -272,15 +302,23 @@ def compute_pref_value_item_single_S(
         print("max |Gamma_rr - Gamma_rl| =",
           torch.max(torch.abs(Gamma_r_r - Gamma_r_l)))
         '''
-    
+        ''' print('\nKernel Terms:')
+        print('\nK_XS_xlS - K_XS_xrS):')
         print(torch.max(torch.abs(K_XS_xlS - K_XS_xrS)))
+        print('\nK_XlS_xlS - K_XlS_xrS):')
         print(torch.max(torch.abs(K_XlS_xlS - K_XlS_xrS)))
+        print('\nK_XrS_xlS - K_XrS_xrS):')
         print(torch.max(torch.abs(K_XrS_xlS - K_XrS_xrS)))
 
+        print('\nConditional Mean Embeddings:')
+        print('\ncme_l - cme_r:')
         print(torch.max(torch.abs(cme_l - cme_r)))
 
+        print('\nMissing features Integration:')
+        print('\nM_l_l - M_l_r:')     
         print(torch.max(torch.abs(M_l_l - M_l_r)))
-        print(torch.max(torch.abs(M_r_l - M_r_r)))
+        print('\nM_r_l - M_r_r:')     
+        print(torch.max(torch.abs(M_r_l - M_r_r)))'''
         
     # 8. Preference structure
     # Proposition 3.2: original direction - reversed direction
@@ -289,7 +327,8 @@ def compute_pref_value_item_single_S(
     pref_kernel_value = positive - negative
 
     # DEBUG:
-    print(torch.max(torch.abs(pref_kernel_value)))
+    # print("Testing Pref_kernel_value: positive - negative:")
+    # print(torch.max(torch.abs(pref_kernel_value)))
 
     # 9. Multiply with alpha
     # Original from value_observation:

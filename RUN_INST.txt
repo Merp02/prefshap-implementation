@@ -1,0 +1,16 @@
+Leave the venv: deactivate
+
+Original Directory: cd /Users/pradarshandahal/Desktop/Arbeit/prefshap_imp
+
+Remove the venv: rm -rf .venv
+
+Create new venv: python3 -m venv .venv
+
+Activate the venv: source .venv/bin/activate
+
+Install required packages from requirements.txt: pip install -r requirements.txt
+
+Run the tests: 
+
+python run_test.py
+python run_shapiq_test.py
