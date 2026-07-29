@@ -1,4 +1,4 @@
-from prefshap_clean import pref_shap_item_clean
+from prefshap_math.prefshap_clean import pref_shap_item_clean
 import torch
 import numpy as np
 

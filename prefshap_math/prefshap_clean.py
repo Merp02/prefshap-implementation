@@ -1,4 +1,4 @@
-from prefshap_core import (
+from prefshap_math.prefshap_core import (
     active_features_item,
     build_item_coalitions_and_weights,
     compute_pref_values_item_all_S,

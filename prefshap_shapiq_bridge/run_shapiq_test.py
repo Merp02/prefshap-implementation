@@ -1,8 +1,8 @@
 import torch
 import numpy as np
 
-from prefshap_core import *
-from prefshap_shapiq_clean import (
+from prefshap_math.prefshap_core import *
+from prefshap_shapiq_bridge.prefshap_shapiq_clean import (
     PrefShapItemGame,
     run_shapiq_exact,
     run_shapiq_kernelshap,
@@ -31,12 +31,89 @@ alpha = torch.randn(1, n_ref, dtype=torch.float32)
 # Testing on toy-dataset
 # ----------------------------------------------------------------------
 
-X = torch.from_numpy(np.load("toy_data_5000_10_2/S.npy")).float()
-X_l = torch.from_numpy(np.load("toy_data_5000_10_2/l_processed.npy")).float()
-X_r = torch.from_numpy(np.load("toy_data_5000_10_2/r_processed.npy")).float()
-x_l = X_l[0:1]
-x_r = X_r[0:1]
-alpha = torch.randn(1,X_l.shape[0])
+# X = torch.from_numpy(np.load("toy_data_5000_10_2/S.npy")).float()
+# X_l = torch.from_numpy(np.load("toy_data_5000_10_2/l_processed.npy")).float()
+# X_r = torch.from_numpy(np.load("toy_data_5000_10_2/r_processed.npy")).float()
+# x_l = X_l[0:1]
+# x_r = X_r[0:1]
+# alpha = torch.randn(1,X_l.shape[0])
+
+DATA_DIR = "toy_data_5000_10_2"
+MODEL_PATH = "artifacts/gpm_test_model.npz"
+
+# Reference item dataset used by PREF-SHAP for the conditional embedding.
+X = torch.from_numpy(
+    np.load(f"{DATA_DIR}/S.npy")
+).float()
+
+# Original duels.
+X_l_all = np.load(f"{DATA_DIR}/l_processed.npy")
+X_r_all = np.load(f"{DATA_DIR}/r_processed.npy")
+y_all = np.load(f"{DATA_DIR}/y.npy").reshape(-1)
+
+# Learned GPM components.
+learned = np.load(MODEL_PATH)
+
+alpha = torch.from_numpy(
+    learned["alpha"]
+).float().reshape(1, -1)
+
+# Important: these are Nyström centers, not all original duels.
+X_l = torch.from_numpy(
+    learned["Xl_centres"]
+).float()
+
+X_r = torch.from_numpy(
+    learned["Xr_centres"]
+).float()
+
+lengthscale = float(
+    np.asarray(learned["lengthscale"]).item()
+)
+
+test_indices = learned["test_indices"].astype(int)
+
+if len(test_indices) == 0:
+    raise ValueError("The saved model contains no test indices.")
+
+# Select one real held-out duel.
+explained_index = int(test_indices[0])
+
+x_l = torch.from_numpy(
+    X_l_all[explained_index : explained_index + 1]
+).float()
+
+x_r = torch.from_numpy(
+    X_r_all[explained_index : explained_index + 1]
+).float()
+
+y_explained = int(y_all[explained_index])
+
+assert alpha.shape[1] == X_l.shape[0]
+assert X_l.shape == X_r.shape
+assert X.shape[1] == X_l.shape[1]
+assert x_l.shape[1] == X.shape[1]
+assert x_r.shape[1] == X.shape[1]
+assert np.isfinite(lengthscale)
+assert lengthscale > 0.0
+
+print("Explained duel index:", explained_index)
+print("Observed label:", y_explained)
+print("RBF lengthscale:", lengthscale)
+
+print ("\n==========================")
+print ("==========================")
+
+print("S:", X.shape)
+print("Original left duels:", X_l_all.shape)
+print("Original right duels:", X_r_all.shape)
+print("Learned centers:", X_l.shape)
+
+
+print ("\n==========================")
+print ("\n==========================")
+
+
 
 print("X shape:", X.shape)
 print("X_l shape:", X_l.shape)
@@ -45,10 +122,27 @@ print("x_l shape:", x_l.shape)
 print("x_r shape:", x_r.shape)
 print("alpha shape:", alpha.shape)
 
+def rbf_kernel(A, B=None, S=None, sigma=None):
+    """RBF kernel matching the kernel used to learn g."""
+    if B is None:
+        B = A
+
+    if sigma is None:
+        sigma = lengthscale
+
+    A_2 = (A**2).sum(dim=1, keepdim=True)
+    B_2 = (B**2).sum(dim=1, keepdim=True).T
+
+    distance = A_2 + B_2 - 2 * A @ B.T
+    distance = torch.clamp(distance, min=0.0)
+
+    return torch.exp(
+        -0.5 * distance / sigma**2
+    )
 # ----------------------------------------------------------------------
 # rbf_kernel
 # ----------------------------------------------------------------------
-def rbf_kernel(A,B=None,S=None,sigma=1.0):
+def rbf_kernel1(A,B=None,S=None,sigma=1.0):
     '''
     Parameters:
     σ small : only very close points are considered similar
@@ -139,7 +233,7 @@ v_empty = game(empty)[0]
 print("Empty: " , empty)
 print("V_empty = ", v_empty) # soll 0 sein
 
-from prefshap_core import g_hat
+from prefshap_math.prefshap_core import g_hat
 
 print("\n------------------")
 print("FUll Coallition:")

@@ -19,7 +19,7 @@ import numpy as np
 import torch
 import shapiq
 
-from prefshap_core import compute_pref_value_item_single_S
+from prefshap_math.prefshap_core import compute_pref_value_item_single_S
 
 
 class PrefShapItemGame(shapiq.Game):

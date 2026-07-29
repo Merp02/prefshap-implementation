@@ -1,0 +1,31 @@
+{
+  "source": "/Users/pradarshandahal/Desktop/Arbeit/prefshap_imp/toy_data_5000_10_2",
+  "seed": 0,
+  "n_duels": 5000,
+  "n_features": 10,
+  "n_train": 4000,
+  "n_test": 1000,
+  "n_centres": 300,
+  "alpha_shape": [
+    300
+  ],
+  "centre_left_shape": [
+    300,
+    10
+  ],
+  "centre_right_shape": [
+    300,
+    10
+  ],
+  "lengthscale": 1.2867225051636466,
+  "lambda": 1e-06,
+  "jitter_used": 7.608788511675108e-07,
+  "train_auc": 0.9999016885553471,
+  "test_auc": 0.998803190957087,
+  "test_accuracy": 0.985,
+  "probability_min": 6.8289538070884966e-18,
+  "probability_max": 1.0,
+  "skew_symmetry_max_error": 0.0,
+  "kernel_score_reconstruction_max_error": 2.4868995751603507e-14,
+  "passed": true
+}
