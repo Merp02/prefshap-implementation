@@ -9,17 +9,19 @@ exactly as Proposition 3.2 . That function is the actual "game".
 solve_weighted_regression_clean, ...) is generic KernelSHAP machinery that
 shapiq already implements and has tested. 
 
-    v(S)  ->  shapiq.Game  ->  shapiq.KernelSHAP / shapiq.ExactComputer  ->  beta
-
-This keeps the value function (the actual PREF-SHAP-specific math) but swaps
-the custom "beta = (Z^T W Z)^-1 Z^T W v" solver for shapiq's.
+    order-1 (Shapley values)        order-2 (k-SII interactions)
+    ------------------------        ----------------------------
+    KernelSHAP                      KernelSHAPIQ
+    RegressionMSR (index="SV")      ProxySHAP        (index="k-SII")
+    PermutationSamplingSV           PermutationSamplingSII
+    SHAPIQ (max_order=1, "SV")      SHAPIQ (max_order=2, "k-SII")
 """
 
 import numpy as np
 import torch
 import shapiq
 
-from prefshap_math.prefshap_core import compute_pref_value_item_single_S
+from prefshap_core import compute_pref_value_item_single_S
 
 
 class PrefShapItemGame(shapiq.Game):
@@ -36,22 +38,19 @@ class PrefShapItemGame(shapiq.Game):
     """
 
     def __init__(
-        self,
-        alpha: torch.Tensor,
-        X_l: torch.Tensor,
-        X_r: torch.Tensor,
-        X: torch.Tensor,
-        x_l: torch.Tensor,
-        x_r: torch.Tensor,
-        kernel,
-        lambda_reg: float,
-        mask: torch.Tensor,
-        y_pred_mean: torch.Tensor | None = None,
-        verbose: bool = False,
+        self, alpha, X_l, X_r, X, x_l, x_r, kernel, lambda_reg, mask,
+        y_pred_mean=None, verbose: bool = False,
     ):
         self.alpha = alpha
         self.X_l, self.X_r, self.X = X_l, X_r, X
+        # learned from `fit_g_pokemon.py``
+        # alpha: (1, M) with M: length of Nyström centers
+        # X_l:   (M, 13)
+        # X_r:   (M, 13)
+
         self.x_l, self.x_r = x_l, x_r
+        # X_l:   (1, 13)
+        # X_r:   (1, 13)
         self.kernel = kernel
         self.lambda_reg = lambda_reg
         self.y_pred_mean = y_pred_mean
@@ -106,52 +105,90 @@ def beta_from_shapley_values(sv: "shapiq.InteractionValues", mask: torch.Tensor)
     beta[mask.bool()] = torch.as_tensor(d_eff_values, dtype=torch.float64) # filling only for active features, inactive = 0
     return beta
 
-
-def run_shapiq_exact(game: PrefShapItemGame) -> "shapiq.InteractionValues":
+def make_exact_computer(game: PrefShapItemGame) -> "shapiq.ExactComputer":
     """
-    Exact Shapley values: evaluates the game on all 2**d_eff coalitions
-    Only feasible for small d_eff
+    One ExactComputer per game. Build it once and reuse it across index=
+    calls (SV, k-SII, ...) -- the underlying 2**d_eff coalition value
+    function evaluations are cached internally and not recomputed.
+    """
+    return shapiq.ExactComputer(n_players=game.n_players, game=game)
+
+def run_shapiq_exact(game_or_computer, index: str = "SV", order: int | None = None):
+    """
+    Exact reference values. Evaluates all 2**d_eff coalitions (once).
     
-    Gives an exact ground truth for validating my implementation/the shapiq part
+    If the supplied object is already an ExactComputer: use it directly
+    otherwise: assume it is a game and create an ExactComputer
     """
-    computer = shapiq.ExactComputer(n_players=game.n_players, game=game)
-    return computer(index="SV")
+    if isinstance(game_or_computer,shapiq.ExactComputer,):
+        computer = game_or_computer
+    else:
+        computer = make_exact_computer(
+        game_or_computer
+    )
+        
+    return computer(index=index, order = order)
 
+# --------------------------------------------------------------------------- #
+# order-1 (Shapley value) approximators
+# --------------------------------------------------------------------------- #
 
-def run_shapiq_kernelshap(game: PrefShapItemGame, budget: int | None = None,
-                           random_state: int | None = 0) -> "shapiq.InteractionValues":
-    """
-    Approximate Shapley values via shapiq's own KernelSHAP regression solver
-    (replaces sample_Z + kernelshap_weights_from_Z + solve_weighted_regression_clean).
+_SV_APPROXIMATORS = {
+    "KernelSHAP": lambda n, seed: shapiq.KernelSHAP(n=n, random_state=seed),
+    "RegressionMSR": lambda n, seed: shapiq.RegressionMSR(n=n, index="SV", random_state=seed),
+    "PermutationSamplingSV": lambda n, seed: shapiq.PermutationSamplingSV(n=n, random_state=seed),
+    "SHAPIQ": lambda n, seed: shapiq.SHAPIQ(n=n, max_order=1, index="SV", random_state=seed),
+}
 
-    budget: number of coalitions to sample & evaluate. 
-    If None, uses 2**d_eff,
-    i.e. exhaustive sampling (exact-equivalent, 
-    useful to cross check against run_shapiq_exact)
-    """
-    d_eff = game.n_players
-    if budget is None:
-        budget = 2 ** d_eff
-
-    approximator = shapiq.KernelSHAP(n=d_eff, random_state=random_state)
+def run_sv_approximator(name: str, game: PrefShapItemGame, budget: int, random_state: int = 0):
+    approximator = _SV_APPROXIMATORS[name](game.n_players, random_state)
     return approximator.approximate(budget=budget, game=game)
 
-def run_shapiq_order2(game: PrefShapItemGame,budget: int | None = None,
-                      random_state: int | None = 0,) -> "shapiq.InteractionValues":
-    """
-    Approximate first-order and pairwise interactions with KernelSHAP-IQ.
-    Uses k-SII with maximum interaction order 2.
-    Returned keys:
-        (i,)      first-order contribution
-        (i, j)    pairwise interaction
-    """
-    d_eff = game.n_players
-    if budget is None:
-        budget = 2 ** d_eff
+# check
 
-    approximator = shapiq.KernelSHAPIQ(n=d_eff,max_order=2,
-                                       index="k-SII",
-                                       random_state=random_state)
 
-    return approximator.approximate(budget=min(int(budget), 2 ** d_eff),
-                                    game=game)
+# --------------------------------------------------------------------------- #
+# order-2 (k-SII interaction) approximators
+# --------------------------------------------------------------------------- #
+
+_INTERACTION_APPROXIMATORS = {
+    "KernelSHAPIQ": lambda n, seed: shapiq.KernelSHAPIQ(n=n, max_order=2, index="k-SII", random_state=seed),
+    "ProxySHAP": lambda n, seed: shapiq.ProxySHAP(n=n, max_order=2, index="k-SII", random_state=seed),
+    "PermutationSamplingSII": lambda n, seed: shapiq.PermutationSamplingSII(n=n, max_order=2, index="k-SII", random_state=seed),
+    "SHAPIQ": lambda n, seed: shapiq.SHAPIQ(n=n, max_order=2, index="k-SII", random_state=seed),
+}
+
+def run_interaction_approximator(name:str, game: PrefShapItemGame,budget: int,
+                      random_state: int = 0,):
+
+    approximator = _INTERACTION_APPROXIMATORS[name](game.n_players, random_state)
+    return approximator.approximate(budget=budget, game=game)
+
+
+
+"""
+-----------------------
+Order-1-Approximatoren:
+-----------------------
+
+KernelSHAP: Approximiert Shapley Values über eine gewichtete Regression auf Koalitionswerten.
+
+RegressionMSR: Verwendet eine Regression auf marginalen Substitutionen zur Schätzung der SV.
+
+PermutationSamplingSV: Sampelt Permutationen der Spieler und mittelt marginale Beiträge.
+
+SHAPIQ mit max_order=1: Die allgemeine SHAP-IQ-Methode wird auf reine Shapley Values beschränkt.
+
+-----------------------
+Order-2-Approximatoren:
+-----------------------
+
+KernelSHAPIQ: Regression-basierte Approximation von Interaktionen.
+
+ProxySHAP: Approximation über eine Proxy-Darstellung.
+
+PermutationSamplingSII: Schätzt Interaktionen über Permutationssampling.
+
+SHAPIQ: Allgemeiner SHAP-IQ-Samplingalgorithmus für Interaktionen.
+
+"""
