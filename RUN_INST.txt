@@ -4,13 +4,24 @@ Original Directory: cd /Users/pradarshandahal/Desktop/Arbeit/prefshap_imp
 
 Remove the venv: rm -rf .venv
 
-Create new venv: python3 -m venv .venv
+Create new venv: python3.12 -m venv .venv
 
 Activate the venv: source .venv/bin/activate
 
+pip install --upgrade pip
+
 Install required packages from requirements.txt: pip install -r requirements.txt
+
+# pip install --force-reinstall --no-cache-dir torch xgboost
 
 Run the tests: 
 
 python run_test.py
 python run_shapiq_test.py
+
+
+python pokemon_data.py 
+python fit_g_pokemon.py
+python benchmark_pokemon.py
+python robustness_seeds.py
+python plot_robustness.py
