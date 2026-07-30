@@ -23,5 +23,3 @@ python run_shapiq_test.py
 python pokemon_data.py 
 python fit_g_pokemon.py
 python benchmark_pokemon.py
-python robustness_seeds.py
-python plot_robustness.py
