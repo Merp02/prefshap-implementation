@@ -3,9 +3,6 @@ Learn the preference function g(x_l, x_r) for the Pokemon duel dataset using
 `pref_fit.fit_preference_model` (Nystrom-whitened kernel logistic
 regression on the preferential kernel k_E). 
 
-Was previously a random placeholder (`alpha = torch.randn(...)`) in the
-shapiq bridge.
-
 Produces and saves (`pokemon_g_fit.npz`):
     alpha        (M,)     learned dual coefficients
     Xl_c, Xr_c   (M, d)   the Nystrom centre duels alpha is expanded over
@@ -32,7 +29,7 @@ def fit_g(
     test_frac: float = 0.2,
     random_state: int = 0,
 ):
-    item_data = load_item_stats(reduced=True)
+    item_data = load_item_stats()
     combats = load_combats()
     X_l, X_r, y = build_duels(item_data, combats, n_duels=n_duels, random_state=random_state)
 
@@ -55,6 +52,8 @@ def fit_g(
         kernel=kernel, n_centres=n_centres, lam=lam, random_state=random_state,
     )
 
+    # AUC: Can the learned preference function predict unseen Pokémon fights?
+    # 0.5 (similar to random guessing) to 1.0 (perfect at distinguishing winners)
     test_auc = model.score(X_l[te], X_r[te], y[te])
 
     # sanity check: skew-symmetry, g(a,b) = -g(b,a)
@@ -63,10 +62,9 @@ def fit_g(
     skew_err = float(np.abs(ab + ba).max())
     # expected = g(a,b) + g(b,a) ~ 0
 
-    print(f"d = {X_l.shape[1]}  m_train = {len(tr)}  M (centres) = {model.fit.n_features}")
-    print(f"lengthscale = {ls:.4f}  lam = {lam:.1e}")
-    print(f"held-out AUC = {test_auc:.4f}")
-    print(f"max |g(a,b)+g(b,a)| = {skew_err:.2e}  (should be ~0, kernel is exactly skew-symmetric)")
+    print(f"\nd = {X_l.shape[1]}  m_train = {len(tr)}  M (centres) = {model.fit.n_features}")
+
+    print(f"\nmax |g(a,b)+g(b,a)| = {skew_err:.2e}  (should be ~0, kernel is exactly skew-symmetric)")
     np.savez(
         "pokemon_g_fit.npz",
         alpha=model.fit.alpha,
@@ -77,6 +75,14 @@ def fit_g(
         test_auc=test_auc,
         feature_names=np.array(item_data.feature_names),
     )
+    print("\nSaved to: pokemon_g_fit.npz")
+    print("Alpha      :", model.alpha.shape)
+    print("Xl_c       :", model.Xl_c.shape)
+    print("Xr_c       :", model.Xr_c.shape)
+    print("lengthscale:", ls)
+    print("lam        :", lam)
+    print("AUC        :", test_auc)
+
     return model, item_data, (X_l, X_r, y, tr, te)
 
 

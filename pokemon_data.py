@@ -13,11 +13,6 @@ With d_eff < 16 the exact Shapley/interaction values can be computed with
 `shapiq.ExactComputer`(2**13 = 8192 coalitions), which is what 
 the approximators below are then benchmarked against. 
 
-Nothing else about the pipeline changes: swapping the
-feature set back to the full type-augmented one only means passing a
-different `feature_columns()` output further down the line, everything from
-`build_duels` onwards is agnostic to d.
-
 Sign convention :
     y = +1  <=>  left item won
     y = -1  <=>  right item won
@@ -31,27 +26,31 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-
+# pokemon.xls
+#    Pokémon ID → feature vector
+# combats.xls
+#    Pokémon ID, Pokémon ID, winner ID
 POKEMON_CSV = "datasets/pokemon/pokemon.xls"
 COMBATS_CSV = "datasets/pokemon/combats.xls"
-
 
 
 @dataclass
 class PokemonItemData:
     stats: np.ndarray            # (n_items: Pokemon, d: features_names)
     feature_names: list[str]     # length d
-    id_to_row: dict[int, int]    # pokemon "#" -> row index into `stats`
+    id_to_row: dict[int, int]    # pokemon ID -> row index into `stats`
     names: list[str]             # pokemon names, row-aligned with `stats`
 
 
-def load_item_stats(reduced: bool = True) -> PokemonItemData:
+def load_item_stats() -> PokemonItemData:
     """
     Load and preprocess `pokemon.xls`.
+    Produces one feature vector for each Pokemon with 13 dimensions.
 
-    reduced=True  -> numeric(6) + Legendary(1) + Generation one-hot(6) = 13 dims
-    reduced=False -> numeric(6) + Legendary(1) + Type one-hot(~18)     = ~25 dims
-                     (matches the original repo's `Pokemon()` exactly)
+    numeric(6) + Legendary(1) + Generation one-hot(6) = 13 dims
+    
+    Original repo:    
+    numeric(6) + Legendary(1) + Type one-hot(~18)     = ~25 dims
     """
     df = pd.read_csv(POKEMON_CSV)
     df = df.sort_values("#").reset_index(drop=True)
@@ -61,26 +60,16 @@ def load_item_stats(reduced: bool = True) -> PokemonItemData:
 
     numeric_cols = ["HP", "Attack", "Defense", "Sp. Atk", "Sp. Def", "Speed"]
     numeric = df[numeric_cols].astype(float).values
+    # Standardizatiion to make numerical dimensions more comparable
     numeric = StandardScaler().fit_transform(numeric)
 
+    #legendary as binary feature
     legendary = df["Legendary"].astype(int).values.reshape(-1, 1)
-
-    if reduced:
-        gen_dummies = pd.get_dummies(df["Generation"], prefix="gen").astype(float).values
-        gen_names = [f"gen_{g}" for g in sorted(df["Generation"].unique())]
-        stats = np.hstack([numeric, legendary, gen_dummies])
-        feature_names = numeric_cols + ["Legendary"] + gen_names
-    else:
-        type_cols = sorted(set(df["Type 1"].dropna()) | set(df["Type 2"].dropna()))
-        type_mat = np.zeros((len(df), len(type_cols)), dtype=float)
-        col_index = {c: j for j, c in enumerate(type_cols)}
-        for i in range(len(df)):
-            type_mat[i, col_index[df.loc[i, "Type 1"]]] += 1
-            t2 = df.loc[i, "Type 2"]
-            if isinstance(t2, str):
-                type_mat[i, col_index[t2]] += 1
-        stats = np.hstack([numeric, legendary, type_mat])
-        feature_names = numeric_cols + ["Legendary"] + type_cols
+    
+    gen_dummies = pd.get_dummies(df["Generation"], prefix="gen").astype(float).values
+    gen_names = [f"gen_{g}" for g in sorted(df["Generation"].unique())]
+    stats = np.hstack([numeric, legendary, gen_dummies])
+    feature_names = numeric_cols + ["Legendary"] + gen_names
 
     return PokemonItemData(
         stats=stats, feature_names=feature_names, id_to_row=id_to_row, names=names,
@@ -89,6 +78,8 @@ def load_item_stats(reduced: bool = True) -> PokemonItemData:
 
 def load_combats() -> pd.DataFrame:
     df = pd.read_csv(COMBATS_CSV)
+
+    # assert: Winner_i ∈ {First_i, Second_i}
     assert (df["Winner"] == df["First_pokemon"]).sum() + \
            (df["Winner"] == df["Second_pokemon"]).sum() == len(df)
     return df
@@ -121,6 +112,7 @@ def build_duels(
     X_r = np.empty((m, d))
     y = np.empty(m)
 
+    # randomised left/right assignment
     directions = rng.integers(0, 2, size=m)
     first = combats["First_pokemon"].values
     second = combats["Second_pokemon"].values
@@ -152,12 +144,12 @@ def background_sample(item_data: PokemonItemData, n_ref: int = 200, random_state
 
 
 if __name__ == "__main__":
-    item_data = load_item_stats(reduced=True)
+    item_data = load_item_stats()
     combats = load_combats()
     X_l, X_r, y = build_duels(item_data, combats, n_duels=8000, random_state=0)
     X_bg = background_sample(item_data, n_ref=200)
 
-    print("feature_names:", item_data.feature_names)
-    print("d =", X_l.shape[1])
-    print("X_l", X_l.shape, "X_r", X_r.shape, "y", y.shape, "X_bg", X_bg.shape)
-    print("y balance:", (y > 0).mean())
+    print("\nFeatures:", item_data.feature_names)
+    print("\nDimension d =", X_l.shape[1])
+    print("\nX_l", X_l.shape, "X_r", X_r.shape, "y", y.shape, "X_bg", X_bg.shape)
+    print("\ny balance:", (y > 0).mean())
