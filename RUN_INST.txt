@@ -8,9 +8,12 @@ Create new venv: python3.12 -m venv .venv
 
 Activate the venv: source .venv/bin/activate
 
-pip install --upgrade pip
+# pip install --upgrade pip
 
 Install required packages from requirements.txt: pip install -r requirements.txt
+
+# check:
+# python -c "import numpy, torch, shapiq, xgboost; print('environment OK')"
 
 # pip install --force-reinstall --no-cache-dir torch xgboost
 
@@ -19,7 +22,9 @@ Run the tests:
 python run_test.py
 python run_shapiq_test.py
 
-
+Pokemon:
 python pokemon_data.py 
 python fit_g_pokemon.py
 python benchmark_pokemon.py
+python test_seeds.py
+python plot_test_seeds.py

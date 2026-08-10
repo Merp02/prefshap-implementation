@@ -27,7 +27,7 @@ from pokemon_data import load_item_stats, background_sample
 from prefshap_core import active_features_item
 from prefshap_shapiq_clean import (
     PrefShapItemGame, make_exact_computer, run_shapiq_exact,
-    run_sv_approximator, run_interaction_approximator,
+    run_sv_approximator, run_interaction_approximator, run_order3_approximator
 )
 
 torch.set_default_dtype(torch.float64)
@@ -53,7 +53,7 @@ def build_game_for_duel(x_l_row: np.ndarray, x_r_row: np.ndarray, fit_path="poke
     ls = float(data["lengthscale"])
 
     # 200 background pokemons
-    item_data = load_item_stats(reduced=True)
+    item_data = load_item_stats()
     X_bg = torch.as_tensor(background_sample(item_data, n_ref=n_background, random_state=random_state))
 
     # test pokemons
@@ -85,7 +85,9 @@ def error_table_sv(exact_beta: torch.Tensor, approx_beta: torch.Tensor):
     return {"max_err": diff.max().item(), "mean_err": diff.mean().item()}
 
 def interactions_to_vec(values, mask, order):
-    """dict_values with tuple keys of length `order` -> full-length (d,) or (d,d) tensor slice, active features only."""
+    """
+    Converts dictionary formatted interaction values into clean 1D (vector) and 2D (matrix) NumPy arrays
+    """
     active_idx = torch.where(mask)[0].tolist()
     idx_pos = {g: p for p, g in enumerate(active_idx)}
     d_eff = len(active_idx)
@@ -102,14 +104,23 @@ def interactions_to_vec(values, mask, order):
                 i, j = key
                 out[i, j] = out[j, i] = val
         return out
+    if order == 3 :
+        out = np.zeros((d_eff, d_eff, d_eff))
+        for key,val in values.items():
+            if len(key) == 3:
+                i,j,k = key
+                out[i,j,k] = out[i,k,j] = out[j,i,k] = out[j,k,i] = out[k,i,j] = out[k,j,i] = val
+        return out
     raise ValueError(order)
 
 
 
 def main():
     print("Loading fitted g and building the explanation game...")
-    _, item_data = build_game_for_duel(np.zeros(13), np.zeros(13))  # just to get item_data cheaply
+    # dummy game: just to get item_data cheaply
+    _, item_data = build_game_for_duel(np.zeros(13), np.zeros(13))  
     x_l_row, x_r_row = pick_duel(item_data, "Charizard", "Squirtle")
+    #actual PREF_SHAP game
     game, item_data = build_game_for_duel(x_l_row, x_r_row)
     print(f"d_eff = {game.n_players}  (2**d_eff = {2**game.n_players} coalitions for the exact reference)")
 
@@ -124,24 +135,48 @@ def main():
     print("v(full)  =", game(np.ones((1, game.n_players), dtype=bool))[0])
     print("sum(beta_exact) =", beta_exact.sum().item())
 
+    # Pair each feature name with its computed Shapley value
     print("\nfeature : exact SV")
     for name, v in zip(item_data.feature_names, beta_exact.tolist()):
         print(f"  {name:10s} {v:+.4f}")
 
+    # Find largest contributor by magnitude
+    max_idx = beta_exact.abs().argmax().item()
+    top_name = item_data.feature_names[max_idx]
+    top_val = beta_exact[max_idx].item()
+
+    # Determine direction (positive -> Charizard, negative -> Squirtle)
+    target = "Charizard" if top_val > 0 else "Squirtle"
+
+    print(f"\nlargest contributor: {top_name} {top_val:+.4f}")
+    print(f"-> {top_name} strongly pushes the model toward {target}.")  
+    
     t0 = time.time()
     order2_exact = run_shapiq_exact(computer, index="k-SII", order=2)
     t_exact_int = time.time() - t0
     print(f"\nExact order-2 k-SII computed in {t_exact_int:.1f}s")
 
-    exact_first = interactions_to_vec(order2_exact.dict_values, game.mask, order=1)
-    exact_pair = interactions_to_vec(order2_exact.dict_values, game.mask, order=2)
+    t0 = time.time()
+    order3_exact = run_shapiq_exact(computer, index="k-SII", order=3)
+    t_exact_o3 = time.time() - t0
+    print(f"\nExact order-3 k-SII computed in {t_exact_int:.1f}s") 
+
+
+    # Note: order3_exact contains all orders up to 3, so you can extract all from order3_exact
+
+    # exact_first (d_eff,)	                    Single feature contributions
+    exact_first = interactions_to_vec(order3_exact.dict_values, game.mask, order=1)
+    # exact_pair (d_eff, d_eff) 	            Symmetric matrix for interactions
+    exact_pair = interactions_to_vec(order3_exact.dict_values, game.mask, order=2)
+    # exact:triplet = (d_eff, d_eff, d_eff)     3d tensor
+    exact_triplet = interactions_to_vec(order3_exact.dict_values, game.mask, order=3)
 
     # --------------------------------------------------------------- #
     # order-1 approximators
     # --------------------------------------------------------------- #
-    print("\n" + "=" * 70)
+    print("\n" + "-" * 70)
     print("order-1 (Shapley value) approximators vs exact SV")
-    print("=" * 70)
+    print("-" * 70)
     budgets = [200, 500, 1000, 2000]
     sv_names = ["KernelSHAP", "RegressionMSR", "PermutationSamplingSV", "SHAPIQ"]
     sv_results = []
@@ -163,9 +198,9 @@ def main():
     # --------------------------------------------------------------- #
     # order-2 approximators
     # --------------------------------------------------------------- #
-    print("\n" + "=" * 70)
+    print("\n" + "-" * 70)
     print("order-2 (k-SII interaction) approximators vs exact k-SII")
-    print("=" * 70)
+    print("-" * 70)
     int_names = ["KernelSHAPIQ", "ProxySHAP", "PermutationSamplingSII", "SHAPIQ"]
     int_results = []
     for name in int_names:
@@ -185,11 +220,39 @@ def main():
             print(f"  {name:24s} budget={budget:5d}  max_err(order1)={max_err_1:.4f}  "
                   f"max_err(order2)={max_err_2:.4f}  ({dt:.2f}s)")
 
+    # --------------------------------------------------------------- #
+    # order-3 approximators
+    # --------------------------------------------------------------- #
+    print("\n" + "-" * 70)
+    print("order-3 (k-SII interaction) approximators vs exact k-SII")
+    print("-" * 70)
+    int_names = ["KernelSHAPIQ", "ProxySHAP", "PermutationSamplingSII", "SHAPIQ"]
+    int_results = []
+    for name in int_names:
+        for budget in budgets:
+            t0 = time.time()
+            try:
+                approx = run_order3_approximator(name, game, budget=budget, random_state=0)
+            except Exception as e:
+                print(f"  {name:24s} budget={budget:5d}  FAILED: {e}")
+                continue
+            dt = time.time() - t0
+            approx_first = interactions_to_vec(approx.dict_values, game.mask, order=1)
+            approx_pair = interactions_to_vec(approx.dict_values, game.mask, order=2)
+            approx_triplet = interactions_to_vec(approx.dict_values, game.mask, order=3)
+            max_err_1 = np.abs(approx_first - exact_first).max()
+            max_err_2 = np.abs(approx_pair - exact_pair).max()
+            max_err_3 = np.abs(approx_triplet - exact_triplet).max()
+            int_results.append((name, budget, max_err_1, max_err_2,max_err_3, dt))
+            print(f"  {name:24s} budget={budget:5d}  max_err(order1)={max_err_1:.4f}  "
+                  f"max_err(order2)={max_err_2:.4f} max_err(order3)={max_err_3:.4f} ({dt:.2f}s)")
+
+
     np.savez(
         "benchmark_results.npz",
         feature_names=np.array(item_data.feature_names),
         beta_exact=beta_exact.numpy(),
-        exact_first=exact_first, exact_pair=exact_pair,
+        exact_first=exact_first, exact_pair=exact_pair,exact_triplet=exact_triplet,
         sv_results=np.array(sv_results, dtype=object),
         int_results=np.array(int_results, dtype=object),
     )

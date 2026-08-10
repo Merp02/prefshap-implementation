@@ -6,7 +6,7 @@ Originally: load_experiments.py:
 
 Change: The type one-hot columns are dropped so that d_eff stays under 16. 
 
-    original repo : numeric stats (6) + Legendary (1) + one-hot Type (~18)  -> d ~ 25
+    original repo : numeric stats (6) + Legendary (1) + one-hot Type (~18)  ->  d ~ 25
     now           : numeric stats (6) + Legendary (1) + one-hot Generation (6) -> d = 13
 
 With d_eff < 16 the exact Shapley/interaction values can be computed with

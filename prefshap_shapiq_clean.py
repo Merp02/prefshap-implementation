@@ -164,6 +164,22 @@ def run_interaction_approximator(name:str, game: PrefShapItemGame,budget: int,
     approximator = _INTERACTION_APPROXIMATORS[name](game.n_players, random_state)
     return approximator.approximate(budget=budget, game=game)
 
+# --------------------------------------------------------------------------- #
+# order-3 (k-SII interaction) approximators
+# --------------------------------------------------------------------------- #
+
+_ORDER3_APPROXIMATORS = {
+    "KernelSHAPIQ": lambda n, seed: shapiq.KernelSHAPIQ(n=n, max_order=3, index="k-SII", random_state=seed),
+    "ProxySHAP": lambda n, seed: shapiq.ProxySHAP(n=n, max_order=3, index="k-SII", random_state=seed),
+    "PermutationSamplingSII": lambda n, seed: shapiq.PermutationSamplingSII(n=n, max_order=3, index="k-SII", random_state=seed),
+    "SHAPIQ": lambda n, seed: shapiq.SHAPIQ(n=n, max_order=3, index="k-SII", random_state=seed),
+}
+
+def run_order3_approximator(name:str, game: PrefShapItemGame,budget: int,
+                      random_state: int = 0,):
+
+    approximator = _ORDER3_APPROXIMATORS[name](game.n_players, random_state)
+    return approximator.approximate(budget=budget, game=game)
 
 
 """
