@@ -48,7 +48,7 @@ ax.set_title("Charizard vs Squirtle: order-1 SV approximators\n(mean ± std over
 ax.legend()
 ax.grid(alpha=0.3)
 fig.tight_layout()
-fig.savefig("test_seeds_sv.png", dpi=150)
+fig.savefig("plots/test_seeds_sv.png", dpi=150)
 print("saved test_seeds_sv.png")
 
 # --------------------------------------------------------------------------- #
@@ -65,7 +65,7 @@ ax.set_title("Charizard vs Squirtle: order-2 interaction approximators\n(mean ±
 ax.legend()
 ax.grid(alpha=0.3)
 fig.tight_layout()
-fig.savefig("test_seeds_interactions.png", dpi=150)
+fig.savefig("plots/test_seeds_interactions.png", dpi=150)
 print("saved test_seeds_interactions.png")
 
 # ---------------------------------------------------------------------------
@@ -84,6 +84,6 @@ ax.set_title("Charizard vs Squirtle: order-3 interaction approximators\n""(mean 
 ax.legend()
 ax.grid(alpha=0.3,which="both")
 fig.tight_layout()
-fig.savefig("test_seeds_order3_log.png", dpi=150)
+fig.savefig("plots/test_seeds_order3_log.png", dpi=150)
 plt.close(fig)
 print("saved test_seeds_order3_log.png")

@@ -28,3 +28,22 @@ python fit_g_pokemon.py
 python benchmark_pokemon.py
 python test_seeds.py
 python plot_test_seeds.py
+
+# Case study 2:
+python case_study_2.py
+python plotting_study.py
+
+# Aggregate pokemon benchmark:
+python agg_pokemon.py \
+    --n-duels 2 \
+    --budgets 200 1000 2000 \
+    --seeds 0 1 \
+    --benchmark-all \
+    --out-dir pokemon_benchmark_pilot
+
+python agg_pokemon.py \
+    --n-duels 20 \
+    --budgets 200 1000 2000 \
+    --seeds 0 1 2 \
+    --benchmark-all \
+    --out-dir pokemon_benchmark_pilot_2
